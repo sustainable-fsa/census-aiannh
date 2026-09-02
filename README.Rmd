@@ -26,14 +26,23 @@ This repository is a [BagIt](https://datatracker.ietf.org/doc/html/rfc8493) arch
 ```
 census-aiannh/
 ├── bagit.txt, bag-info.txt, manifest-sha256.txt
-├── census-aiannh.parquet                     every clipped vintage, stacked
+├── census-aiannh.parquet                     the newest clipped vintage, copied
+├── census-aiannh.topojson                    the newest vintage's TopoJSON, copied
+├── census-aiannh.fgb                         the newest vintage's FlatGeobuf, copied
+├── census-aiannh.pmtiles                     the newest vintage's PMTiles, copied
+├── census-aiannh_cb.topojson                 newest Census cb 500k vintage, copied
+├── census-aiannh_cb.fgb                      newest Census cb 500k vintage, copied
+├── census-aiannh_simple.topojson             newest clipped vintage, simplified
+├── census-aiannh_simple.fgb                  newest clipped vintage, simplified
 ├── census-aiannh-manifest.json               path, size and sha256 of each file
 └── data/
-    ├── raw/tl_<year>_us_aiannh.zip           Census downloads, verbatim
+    ├── raw/<census zip name>                 Census downloads, verbatim (tl_ and cb_)
     ├── parquet/<year>-aiannh.parquet         raw TIGER/Line
     ├── clipped/<year>-aiannh.parquet         cut at that vintage's waterline
     ├── topojson/<year>-aiannh.topojson       display: quantized topology, WGS84
+    ├── topojson/<year>-aiannh_cb.topojson        Census cb 500k, where published
     ├── flatgeobuf/<year>-aiannh.fgb          display/streaming: indexed, NAD83
+    ├── flatgeobuf/<year>-aiannh_cb.fgb           Census cb 500k, where published
     ├── pmtiles/<year>-aiannh.pmtiles         display: vector tiles, layer "aiannh"
     └── quality/geometry_validation.csv       what enforcing validity changed
 ```
@@ -41,17 +50,19 @@ census-aiannh/
 -   [`data/parquet/<year>-aiannh.parquet`](https://data.sustainable-fsa.com/census-aiannh/) – raw TIGER/Line AIANNH areas, exactly as Census published them. 20 files, about 7 MB each.
 -   [`data/clipped/<year>-aiannh.parquet`](https://data.sustainable-fsa.com/census-aiannh/) – the same geometries, cut at that vintage's `cb` 500k waterline. About 7 MB each.
 -   [`data/topojson/`, `data/flatgeobuf/`, `data/pmtiles/`](https://data.sustainable-fsa.com/census-aiannh/) – the clipped form again, as web-display formats. See [Derived Display Formats](#-derived-display-formats).
--   [`census-aiannh.parquet`](https://data.sustainable-fsa.com/census-aiannh/census-aiannh.parquet) – all 20 clipped vintages in one file, 16,468 rows, sorted by `GEOID` then `year`. 15 MB.
+-   [`census-aiannh.parquet`](https://data.sustainable-fsa.com/census-aiannh/census-aiannh.parquet), [`.topojson`](https://data.sustainable-fsa.com/census-aiannh/census-aiannh.topojson), [`.fgb`](https://data.sustainable-fsa.com/census-aiannh/census-aiannh.fgb), [`.pmtiles`](https://data.sustainable-fsa.com/census-aiannh/census-aiannh.pmtiles) – byte-identical copies of the **newest vintage's** clipped and display artifacts, at stable paths. Point a map or an analysis here to always get the current boundaries.
+-   [`census-aiannh_simple.topojson`](https://data.sustainable-fsa.com/census-aiannh/census-aiannh_simple.topojson), [`census-aiannh_simple.fgb`](https://data.sustainable-fsa.com/census-aiannh/census-aiannh_simple.fgb) – the newest clipped vintage **simplified** for small-scale display, keeping the archive's component-level schema. See [Derived Display Formats](#-derived-display-formats).
+-   [`census-aiannh_cb.topojson`](https://data.sustainable-fsa.com/census-aiannh/census-aiannh_cb.topojson), [`census-aiannh_cb.fgb`](https://data.sustainable-fsa.com/census-aiannh/census-aiannh_cb.fgb) – the newest vintage of **Census's own generalized cartographic boundary (cb 500k) AIANNH file**. Entity-level, not component-level — see [The cb Layer](#-the-cb-layer-is-censuss-not-ours).
 -   [`data/quality/geometry_validation.csv`](https://data.sustainable-fsa.com/census-aiannh/data/quality/geometry_validation.csv) – a per-feature record of every geometry the build altered while enforcing validity.
 -   [`_manifest.txt`](https://data.sustainable-fsa.com/census-aiannh/_manifest.txt) – flat index of every file in the S3-hosted mirror.
 
-`census-aiannh.parquet` is sorted by `GEOID` then `year` so an area's whole history is contiguous. Reading one vintage is better served by that vintage's own file in `data/clipped/`.
+The top-level files are the mutable part of the archive: they are rewritten each autumn when Census posts a new vintage. Everything under `data/` is immutable once written, so a historical analysis should cite a vintage's own file in `data/clipped/`.
 
-The raw downloads keep their Census filenames, so 2000 and 2010 are `tl_2010_us_aiannh00.zip` and `tl_2010_us_aiannh10.zip` (both published inside TIGER2010), and 2007 is `fe_2007_us_aiannh.zip` (the TIGER First Edition release).
+The raw downloads keep their Census filenames, so 2000 and 2010 are `tl_2010_us_aiannh00.zip` and `tl_2010_us_aiannh10.zip` (both published inside TIGER2010), 2007 is `fe_2007_us_aiannh.zip` (the TIGER First Edition release), and the cartographic files behind the `_cb` layer are `cb_<year>_us_aiannh_500k.zip` (2010: `gz_2010_us_250_00_500k.zip`).
 
 ## 🧾 Field Descriptions
 
-TIGER splits some entities into separate **reservation** and **off-reservation trust land** features, and this archive keeps that split: the unit of the archive is the area *component*, identified by `GEOID`.
+TIGER splits some entities into separate **reservation** and **off-reservation trust land** features, and this archive keeps that split: the unit of the archive is the area *component*, identified by `GEOID`. The one exception is the `_cb` layer, which is Census's entity-level cartographic product: there `GEOID` is the four-character `AIANNHCE`, and `COMPTYP` and `mask_year` do not apply.
 
 | Field Name | Description |
 |-------------------|-----------------------------------------------------|
@@ -63,7 +74,7 @@ TIGER splits some entities into separate **reservation** and **off-reservation t
 | `LSAD` | The legal/statistical area description code |
 | `COMPTYP` | The component type as published by Census: `R` (reservation), `T` (off-reservation trust land) |
 | `year` | The TIGER/Line vintage the geometry comes from |
-| `mask_year` | The `cb` vintage whose waterline clipped that vintage (clipped and stacked forms only). One value per vintage |
+| `mask_year` | The `cb` vintage whose waterline clipped that vintage (clipped form and everything derived from it). One value per vintage |
 
 ## 🌊 Why Both Raw and Clipped
 
@@ -78,6 +89,22 @@ Three more forms of the clipped layer, one per vintage, for consumers that want 
 -   **TopoJSON** (`data/topojson/`) — quantized shared-arc topology (`quantization=1e6`, `fix-geometry`, as in the org's `fsa-counties-dd17`/`dd22` repos), WGS84 by format convention. The layer is named `aiannh`.
 -   **FlatGeobuf** (`data/flatgeobuf/`) — a lossless, spatially indexed copy of the clipped layer, EPSG:4269 like the parquet. Suits HTTP range-request streaming of bounding-box subsets.
 -   **PMTiles** (`data/pmtiles/`) — tippecanoe vector tiles in a single static file, layer `aiannh`, zoom range chosen from feature density. Serves straight from the CDN over HTTP range requests; no tile server.
+
+The newest vintage is additionally mirrored at the top level (`census-aiannh.parquet`, `.topojson`, `.fgb`, `.pmtiles`) — byte-identical copies at stable paths — alongside two generalized pairs for small-scale display:
+
+-   **`census-aiannh_simple.topojson` / `census-aiannh_simple.fgb`** — the newest clipped vintage generalized with `rmapshaper::ms_simplify(keep = 0.05, keep_shapes = TRUE)` and exported like the full-resolution formats. This pair **keeps the archive's component-level schema** — the R/T split, the five-character `GEOID`, `COMPTYP`, `mask_year` — and **every parcel survives**: because `keep_shapes` protects features rather than their parts, the components are exploded to one feature per parcel before simplification and regrouped afterward, so the scattered allotment parcels of off-reservation trust lands cannot be simplified out of existence. The `Area` property remains the full-resolution clipped area, not the area of the simplified geometry.
+-   **`census-aiannh_cb.topojson` / `census-aiannh_cb.fgb`** — Census's own generalized product, described next.
+
+## 🪶 The cb Layer Is Census's, Not Ours
+
+`data/topojson/<year>-aiannh_cb.topojson` and `data/flatgeobuf/<year>-aiannh_cb.fgb` are **Census's own cartographic boundary (cb) 500k AIANNH files** — generalized to 1:500,000 and clipped to shoreline by Census — normalized to this archive's column names and exported through the same TopoJSON and FlatGeobuf writers as the full-resolution formats. The newest one is copied to `census-aiannh_cb.topojson` / `census-aiannh_cb.fgb` at the top level.
+
+Two things distinguish them from everything else here:
+
+-   **The unit is the entity, not the component.** Census dissolves the reservation / off-reservation trust land split in the cartographic product: `GEOID` is the four-character `AIANNHCE`, there is no `COMPTYP`, and each vintage carries 692–704 entities against TIGER/Line's 734–867 components. That is the product as published, not a collapse performed by this pipeline. Do not join the cb layer to the component-level files on `GEOID`; join on `AIANNHCE`. For a generalized layer that keeps the component-level schema, use the `_simple` pair above.
+-   **They exist only where Census published one**: 2010, 2013, and 2014 onward. Earlier vintages have no cb form — unlike the clip mask, where borrowing a neighboring year's *waterline* is defensible, borrowing its *boundaries* would misrepresent them.
+
+The geometry passes through as published, with no repair and no quality-log rows — nothing is enforced, so there is nothing to log. `Area` is computed from the generalized geometry and is a display approximation; analytical areas belong to the parquet layers.
 
 To put a vintage on a MapLibre map:
 
@@ -125,12 +152,13 @@ The mask only ever changes the coast. Inland boundaries keep full TIGER detail, 
 3.  **Build the vintage's mask** by unioning that year's `cb` 500k counties in spherical geometry and dropping the artifact rings the union leaves behind. The mask is checked for validity before anything is clipped with it.
 4.  **Clip** in a single `mapshaper` invocation (`-clip … remove-slivers -clean rewind`), repair anything left invalid, and re-clip any residual feature in spherical geometry, where an intersection of two valid geometries cannot be invalid.
 5.  **Derive** the display formats from the clipped layer: TopoJSON via `mapshaper`, FlatGeobuf via GDAL, PMTiles via `tippecanoe`.
-6.  **Stack** every clipped vintage into `census-aiannh.parquet`.
-7.  **Publish** to S3 and CloudFront through the shared [`R/s3-archive.R`](R/s3-archive.R) helpers.
+6.  **Normalize** each Census cb 500k AIANNH file (2010, 2013, 2014+) to the archive's column names and export it as the vintage's `_cb` TopoJSON and FlatGeobuf.
+7.  **Mirror** the newest vintage of everything to the stable top-level paths, and simplify the newest clipped vintage into the `_simple` pair.
+8.  **Publish** to S3 and CloudFront through the shared [`R/s3-archive.R`](R/s3-archive.R) helpers.
 
 ## ✅ Geometry Validity
 
-Every feature in `data/clipped/` and in `census-aiannh.parquet` is valid under both spherical (s2) and planar (GEOS) geometry, asserted at build time rather than assumed. Features in `data/parquet/` are s2-valid by construction.
+Every feature in `data/clipped/` — and therefore in `census-aiannh.parquet`, which is a copy of the newest clipped vintage — is valid under both spherical (s2) and planar (GEOS) geometry, asserted at build time rather than assumed. Features in `data/parquet/` are s2-valid by construction. The `_cb` files carry Census's cb geometry as published, and the `_simple` pair is aggressively generalized; neither carries a validity promise from this pipeline — both are display-only.
 
 Enforcing validity means altering geometry, so the archive records what it altered. [`data/quality/geometry_validation.csv`](https://data.sustainable-fsa.com/census-aiannh/data/quality/geometry_validation.csv) holds one row per feature per build stage, written only where the geometry moved or where it arrived or left invalid — a feature passed through untouched contributes no row, and its absence is the record. It accumulates across runs.
 
@@ -169,7 +197,7 @@ Rscript census-aiannh.R                               # all vintages, publish
 VINTAGES=2024,2025 PUBLISH=0 Rscript census-aiannh.R  # two vintages, local only
 ```
 
-Nothing is reprocessed unless necessary: membership in the S3 listing, not a local file, decides whether a vintage already exists. A vintage is complete only when its clipped parquet **and** all three display formats are archived, so a format added later backfills without rebuilding the rest. A run that finds nothing new costs one list call plus a HEAD request per candidate vintage and publishes nothing. The weekly schedule exists because TIGER's release date moves — checking is nearly free, so a new vintage is picked up the week it appears rather than whenever someone remembers to look.
+Nothing is reprocessed unless necessary: membership in the S3 listing, not a local file, decides whether a vintage already exists. A vintage is complete only when its clipped parquet **and** all three display formats are archived — plus, where Census published a cb file, the `_cb` pair — and the archive as a whole only when the eight top-level latest-vintage files exist. A format added later therefore backfills without rebuilding the rest. A run that finds nothing new costs one list call plus a HEAD request per candidate vintage and publishes nothing. The weekly schedule exists because TIGER's release date moves — checking is nearly free, so a new vintage is picked up the week it appears rather than whenever someone remembers to look.
 
 ## 📍 Quick Start
 

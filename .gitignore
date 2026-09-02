@@ -9,5 +9,12 @@
 # S3-hosted data (archive of record: https://data.sustainable-fsa.com/census-aiannh/)
 census-aiannh/
 census-aiannh.parquet
+census-aiannh.topojson
+census-aiannh_cb.topojson
+census-aiannh_simple.topojson
+census-aiannh.fgb
+census-aiannh_cb.fgb
+census-aiannh_simple.fgb
+census-aiannh.pmtiles
 census-aiannh-manifest.json
 census-aiannh.html

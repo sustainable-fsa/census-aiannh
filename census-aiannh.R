@@ -169,6 +169,40 @@ tl_urls <-
   ) %>%
   .[purrr::map_lgl(., url_exists)]
 
+## The _cb artifacts are Census's own cartographic boundary (cb) 500k AIANNH
+## product, generalized and clipped to shoreline by Census. Published for 2010
+## (inside GENZ2010 under the summary-level naming, 250 = AIANNH), 2013, and
+## 2014 onward — the same availability pattern as the cb counties the masks
+## are built from. Vintages without a cb release get no _cb artifacts:
+## borrowing a neighboring year's waterline is one thing, borrowing its
+## boundaries as THE boundaries would misrepresent them.
+cb_aiannh_urls <-
+  c(
+    `2010` =
+      "https://www2.census.gov/geo/tiger/GENZ2010/gz_2010_us_250_00_500k.zip",
+    `2013` =
+      "https://www2.census.gov/geo/tiger/GENZ2013/cb_2013_us_aiannh_500k.zip",
+    2014:(lubridate::year(lubridate::today()) + 1) %>%
+      magrittr::set_names(., .) %>%
+      purrr::map_chr(
+        \(x){
+          paste0(
+            "https://www2.census.gov/geo/tiger/GENZ", x, "/shp/cb_", x, "_us_aiannh_500k.zip"
+          )
+        }
+      )
+  ) %>%
+  .[purrr::map_lgl(., url_exists)]
+
+## The top-level convenience artifacts (census-aiannh.parquet and friends,
+## below) always mirror the newest vintage, so the latest years are pinned
+## before the VINTAGES narrowing can hide them — a VINTAGES=2010 backfill run
+## must not repoint the top-level files at 2010. Pinned separately for the
+## _cb pair: tl and cb releases for a new year need not land the same week,
+## and the top-level _cb files track the newest cb.
+latest_vintage    <- max(as.integer(names(tl_urls)))
+latest_cb_vintage <- max(as.integer(names(cb_aiannh_urls)))
+
 ## VINTAGES=2000,2020 narrows a run to those vintages, which is the difference
 ## between iterating on one and rebuilding twenty.
 vintages <-
@@ -180,23 +214,43 @@ vintages <-
 if (length(vintages)) {
   stopifnot(all(vintages %in% names(tl_urls)))
   tl_urls <- tl_urls[vintages]
+  cb_aiannh_urls <- cb_aiannh_urls[intersect(vintages, names(cb_aiannh_urls))]
   message("VINTAGES set: building ", paste(vintages, collapse = ", "))
 }
 
-## Nothing new to build means nothing to restack either, so stop before
+## Nothing new to build means nothing to re-derive either, so stop before
 ## re-downloading the archive to rediscover it. Census posts a vintage once a
 ## year. A vintage is finished only when all four of its display-and-analysis
 ## artifacts exist, so a format added later backfills on the next run instead
-## of hiding behind the clipped parquet.
+## of hiding behind the clipped parquet. The eight top-level latest-vintage
+## artifacts gate the same way: adding one later pushes a run past this exit.
 required_keys <-
-  names(tl_urls) %>%
-  purrr::map(\(y) c(
-    paste0("data/clipped/",    y, "-aiannh.parquet"),
-    paste0("data/topojson/",   y, "-aiannh.topojson"),
-    paste0("data/flatgeobuf/", y, "-aiannh.fgb"),
-    paste0("data/pmtiles/",    y, "-aiannh.pmtiles")
-  )) %>%
-  purrr::list_c()
+  c(
+    names(tl_urls) %>%
+      purrr::map(\(y) c(
+        paste0("data/clipped/",    y, "-aiannh.parquet"),
+        paste0("data/topojson/",   y, "-aiannh.topojson"),
+        paste0("data/flatgeobuf/", y, "-aiannh.fgb"),
+        paste0("data/pmtiles/",    y, "-aiannh.pmtiles")
+      )) %>%
+      purrr::list_c(),
+    ## The _cb pair only exists for vintages Census published a cb AIANNH
+    ## file for.
+    names(cb_aiannh_urls) %>%
+      purrr::map(\(y) c(
+        paste0("data/topojson/",   y, "-aiannh_cb.topojson"),
+        paste0("data/flatgeobuf/", y, "-aiannh_cb.fgb")
+      )) %>%
+      purrr::list_c(),
+    "census-aiannh.parquet",
+    "census-aiannh.topojson",
+    "census-aiannh.fgb",
+    "census-aiannh.pmtiles",
+    "census-aiannh_cb.topojson",
+    "census-aiannh_cb.fgb",
+    "census-aiannh_simple.topojson",
+    "census-aiannh_simple.fgb"
+  )
 
 if (publish && all(required_keys %in% archived)) {
   gate_skip(paste0("All ", length(tl_urls),
@@ -920,18 +974,24 @@ clipped_parquet <-
   })
 
 ## On a CI runner a vintage that is already archived was never built locally,
-## so any stage that reads a clipped parquet has to be able to pull it back
-## from the archive first. (census-counties' stack lacks this and would fail
-## the week a new vintage lands on a fresh runner — worth back-porting.)
-ensure_clipped <-
+## so any stage that reads a bag file has to be able to pull it back from the
+## archive first. (census-counties' stack lacks this and would fail the week
+## a new vintage lands on a fresh runner — worth back-porting.) Takes a
+## bag-relative path — the same shape every builder above returns — and maps
+## it to its S3 key by stripping the bag_dir prefix.
+ensure_archived <-
   function(path){
     if (!file.exists(path))
-      s3_get_file(paste0(s3_prefix, "/data/clipped/", basename(path)), path)
+      s3_get_file(paste0(s3_prefix, "/",
+                         stringr::str_remove(path, paste0("^", bag_dir, "/"))),
+                  path)
 
     stopifnot(file.exists(path))
 
     path
   }
+
+ensure_clipped <- ensure_archived
 
 ## ---- Derived display formats: TopoJSON, FlatGeobuf, PMTiles ----
 ## Three display forms per vintage, all derived from the clipped layer and none
@@ -1026,35 +1086,224 @@ clipped_parquet %>%
     }
   })
 
-## ---- Stack every clipped vintage into one file ----
-## One row per area component per vintage, sorted by GEOID then year — the
-## (fips, year) trick from census-counties, where it took the stack from 867 MB
-## to 107 MB: a Parquet page holds a feature's ~20 near-identical vintages
-## side by side, which ZSTD collapses, rather than unrelated features.
+## ---- The _cb display formats: Census's own cb 500k AIANNH ----
+## The Census cartographic boundary files as published — generalized to
+## 1:500k and clipped to shoreline by Census — so their provenance is
+## Census's. (For a generalized layer that keeps this archive's schema, see
+## the _simple pair among the top-level artifacts below.)
 ##
-## ROW_GROUP_SIZE=2000 is convention here, not the necessity it is in
-## census-counties: at ~17k rows of far smaller geometries the 2 GiB Arrow
-## BinaryArray cap that forced it there cannot be hit. It is kept because the
-## two archives should read the same, and small row groups still compress and
-## scan well at this size.
-census_aiannh <-
-  clipped_parquet %>%
-  purrr::map(ensure_clipped) %>%
-  purrr::map(sf::read_sf) %>%
-  dplyr::bind_rows() %>%
-  dplyr::arrange(GEOID, year) %T>%
-  sf::write_sf(
-    "census-aiannh.parquet",
-    driver = "Parquet",
-    layer_options = c("COMPRESSION=ZSTD",
-                      "COMPRESSION_LEVEL=13",
-                      "ROW_GROUP_SIZE=2000"),
-    delete_dsn = TRUE
-  )
+## THE UNIT DIFFERS FROM THE REST OF THE ARCHIVE, because it differs in the
+## source: cb AIANNH files carry one feature per ENTITY — GEOID is the
+## 4-character AIANNHCE, there is no COMPTYP, and Census has dissolved the
+## reservation / off-reservation-trust-land split (692–704 features against
+## tl's 734–867). That is the product, not a collapse performed here; the
+## component-level R/T rule still binds everything built from tl.
+##
+## Schema drift, verified by ogrinfo on the actual zips (2026-09-01): 2010 is
+## the gz_ summary-level file (GEO_ID/AIANHH, no GNIS, no NAMELSAD, textual
+## LSAD); AIANNHNS appears from 2013; NAMELSAD from 2021; 2025 adds GEOIDFQ,
+## so the selectors stay anchored, as in the tl reader above. Display-only:
+## geometry passes through as published, no repair, no quality-log rows —
+## nothing is enforced, so there is nothing to log.
+cb_aiannh_urls %>%
+  purrr::iwalk(\(url, year){
+    topo_file <- file.path(bag_dir, "data", "topojson",
+                           paste0(year, "-aiannh_cb.topojson"))
+    fgb_file  <- file.path(bag_dir, "data", "flatgeobuf",
+                           paste0(year, "-aiannh_cb.fgb"))
 
-message(nrow(census_aiannh), " rows, ",
-        dplyr::n_distinct(census_aiannh$GEOID), " area components, ",
-        dplyr::n_distinct(census_aiannh$year), " vintages")
+    due <-
+      function(f){
+        !file.exists(f) &&
+          !(stringr::str_remove(f, paste0("^", bag_dir, "/")) %in% archived)
+      }
+
+    topo_due <- due(topo_file)
+    fgb_due  <- due(fgb_file)
+
+    if (!topo_due && !fgb_due) return(invisible(NULL))
+
+    message("=== ", year, " cb 500k ===")
+
+    zipfile <-
+      file.path(bag_dir, "data", "raw", basename(url))
+
+    if (!file.exists(zipfile))
+      curl::multi_download(urls = url,
+                           destfiles = zipfile,
+                           resume = TRUE)
+
+    cb <-
+      zipfile %>%
+      file.path("/vsizip", .) %>%
+      sf::read_sf() %>%
+      dplyr::select(
+        GEOID    = dplyr::matches("^(GEOID|AIANHH)$"),
+        AIANNHCE = dplyr::matches("^AIANNHCE$"),
+        GNIS     = dplyr::matches("^AIANNHNS$"),
+        Name     = dplyr::matches("^NAME$"),
+        `NameLSAD` = dplyr::matches("^NAMELSAD$"),
+        LSAD     = dplyr::matches("^LSAD$")
+      ) %>%
+      {if ("AIANNHCE" %in% names(.)) . else dplyr::mutate(., AIANNHCE = GEOID)} %>%
+      {if ("GNIS" %in% names(.)) . else dplyr::mutate(., GNIS = NA_character_)} %>%
+      {if ("NameLSAD" %in% names(.)) . else dplyr::mutate(., `NameLSAD` = NA_character_)} %>%
+      dplyr::mutate(
+        Name = iconv(Name, from = "latin1", to = "UTF-8"),
+        `NameLSAD` = iconv(`NameLSAD`, from = "latin1", to = "UTF-8"),
+        year = as.integer(year)
+      ) %>%
+      sf::st_cast("MULTIPOLYGON", warn = FALSE) %>%
+      sf::st_transform("EPSG:4269") %>%
+      dplyr::mutate(Area = sf::st_area(geometry)) %>%
+      dplyr::select(GEOID, AIANNHCE, GNIS, Name, `NameLSAD`, LSAD, year, Area) %>%
+      dplyr::arrange(GEOID)
+
+    if (fgb_due)
+      sf::write_sf(cb, fgb_file,
+                   layer = "aiannh",
+                   driver = "FlatGeobuf",
+                   delete_dsn = TRUE)
+
+    if (topo_due) {
+      geojson_4326 <- tempfile(fileext = ".geojson")
+
+      on.exit(unlink(geojson_4326), add = TRUE)
+
+      cb %>%
+        dplyr::mutate(Area = as.numeric(Area)) %>%
+        sf::st_transform("EPSG:4326") %>%
+        geojsonsf::sf_geojson() %>%
+        writeLines(geojson_4326)
+
+      processx::run(
+        "mapshaper-xl",
+        c(geojson_4326,
+          "-rename-layers", "aiannh",
+          "-o", topo_file,
+          "format=topojson", "quantization=1e6", "fix-geometry"),
+        echo = FALSE
+      )
+    }
+  })
+
+## ---- Top-level latest-vintage artifacts ----
+## Six byte-identical copies of the newest vintage's artifacts, at stable
+## paths a consumer can hardcode without knowing which vintage is current.
+## (They replaced an all-vintage stack: the per-vintage files in data/
+## already serve history, and the stable path is more useful pointing at
+## "now".) The _cb pair follows latest_cb_vintage, which can lag
+## latest_vintage when Census posts a year's tl before its cb.
+##
+## Cheap to rebuild unconditionally on any run that gets this far; a backfill
+## of an old vintage rewrites them with identical content.
+file.copy(
+  ensure_archived(file.path(bag_dir, "data", "clipped",
+                            paste0(latest_vintage, "-aiannh.parquet"))),
+  "census-aiannh.parquet", overwrite = TRUE)
+
+file.copy(
+  ensure_archived(file.path(bag_dir, "data", "topojson",
+                            paste0(latest_vintage, "-aiannh.topojson"))),
+  "census-aiannh.topojson", overwrite = TRUE)
+
+file.copy(
+  ensure_archived(file.path(bag_dir, "data", "flatgeobuf",
+                            paste0(latest_vintage, "-aiannh.fgb"))),
+  "census-aiannh.fgb", overwrite = TRUE)
+
+file.copy(
+  ensure_archived(file.path(bag_dir, "data", "pmtiles",
+                            paste0(latest_vintage, "-aiannh.pmtiles"))),
+  "census-aiannh.pmtiles", overwrite = TRUE)
+
+file.copy(
+  ensure_archived(file.path(bag_dir, "data", "topojson",
+                            paste0(latest_cb_vintage, "-aiannh_cb.topojson"))),
+  "census-aiannh_cb.topojson", overwrite = TRUE)
+
+file.copy(
+  ensure_archived(file.path(bag_dir, "data", "flatgeobuf",
+                            paste0(latest_cb_vintage, "-aiannh_cb.fgb"))),
+  "census-aiannh_cb.fgb", overwrite = TRUE)
+
+## The _simple pair is the newest clipped vintage generalized with
+## ms_simplify, keeping this archive's component-level schema: the R/T
+## split, the 5-char GEOID, COMPTYP, mask_year. Two deliberate departures
+## from the fsa-counties-dd17/dd22 precedent (user decisions, 2026-09-01):
+##
+## - keep = 0.05, not dd's 0.008. AIANNH geometry is far less forgiving than
+##   counties: at 0.008 with feature-level keep_shapes, 72% of polygon parts
+##   vanished and 196 of 867 components lost over half their area.
+## - keep_shapes protects FEATURES, not parts — so the components are
+##   exploded to one row per parcel first, simplified with every parcel its
+##   own feature (none can vanish), and regrouped by component. The explode
+##   and regroup are sf-side (st_cast / group_by + summarise, the raw
+##   stage's own pattern) — NOT mapshaper's ms_explode/ms_dissolve, whose
+##   coordinate snapping is what broke census-counties' mask; that ban
+##   stands. do_union = FALSE: a spherical union would gate on s2 validity,
+##   which simplified geometry does not promise.
+##
+## Only the simplification step is ported from dd17/dd22 — not their
+## territory filter or shift_geometry().
+##
+## Simplified in EPSG:4269; rmapshaper round-trips the CRS, so the FlatGeobuf
+## keeps NAD83 like its full-resolution counterpart, and the TopoJSON export
+## transforms to WGS84 explicitly, as everywhere else in the build. Area
+## loses its units class up front — ms_simplify travels through GeoJSON,
+## which cannot carry one — and stays the pre-simplification clipped area:
+## the number that means something, where the simplified geometry's own area
+## is a display approximation.
+simplified <-
+  ensure_archived(file.path(bag_dir, "data", "clipped",
+                            paste0(latest_vintage, "-aiannh.parquet"))) %>%
+  sf::read_sf() %>%
+  dplyr::mutate(Area = as.numeric(Area)) %>%
+  sf::st_cast("MULTIPOLYGON", warn = FALSE) %>%
+  sf::st_cast("POLYGON", warn = FALSE, do_split = TRUE) %>%
+  rmapshaper::ms_simplify(keep = 0.05,
+                          keep_shapes = TRUE,
+                          sys = TRUE,
+                          sys_mem = 16) %>%
+  dplyr::group_by(GEOID, AIANNHCE, GNIS, Name, `NameLSAD`, LSAD, COMPTYP,
+                  year, mask_year, Area) %>%
+  dplyr::summarise(.groups = "drop", do_union = FALSE) %>%
+  sf::st_cast("MULTIPOLYGON", warn = FALSE)
+
+stopifnot(identical(
+  sort(unique(simplified$GEOID)),
+  sort(sf::read_sf(file.path(bag_dir, "data", "clipped",
+                             paste0(latest_vintage, "-aiannh.parquet")))$GEOID)
+))
+
+sf::write_sf(simplified, "census-aiannh_simple.fgb",
+             layer = "aiannh",
+             driver = "FlatGeobuf",
+             delete_dsn = TRUE)
+
+local({
+  geojson_simple <- tempfile(fileext = ".geojson")
+
+  on.exit(unlink(geojson_simple), add = TRUE)
+
+  simplified %>%
+    sf::st_transform("EPSG:4326") %>%
+    geojsonsf::sf_geojson() %>%
+    writeLines(geojson_simple)
+
+  processx::run(
+    "mapshaper-xl",
+    c(geojson_simple,
+      "-rename-layers", "aiannh",
+      "-o", "census-aiannh_simple.topojson",
+      "format=topojson", "quantization=1e6", "fix-geometry"),
+    echo = FALSE
+  )
+})
+
+message("top-level artifacts mirror the ", latest_vintage, " vintage",
+        if (latest_cb_vintage != latest_vintage)
+          paste0(" (cb: ", latest_cb_vintage, ")"))
 
 # ---- Write bagit.txt ----
 writeLines(c(
@@ -1105,10 +1354,54 @@ if (!publish) {
             allow_extra = character(0),
             expect_exact = FALSE)
 
+  ## The eight top-level latest-vintage artifacts live outside the
+  ## append-only bag push because they are the mutable half of the archive:
+  ## same key, new content, every year a vintage lands. The TopoJSONs go up
+  ## as application/json — without it s3_put() falls back to octet-stream,
+  ## which CloudFront will not compress (measured in fsa-counties-dd22:
+  ## 1,355,656 bytes served where the gzipped copy is 451,897).
   s3_put(s3_bucket_name,
          paste0(s3_prefix, "/census-aiannh.parquet"),
          "census-aiannh.parquet",
          content_type = "application/vnd.apache.parquet",
+         cache_control = "max-age=3600")
+
+  s3_put(s3_bucket_name,
+         paste0(s3_prefix, "/census-aiannh.topojson"),
+         "census-aiannh.topojson",
+         content_type = "application/json",
+         cache_control = "max-age=3600")
+
+  s3_put(s3_bucket_name,
+         paste0(s3_prefix, "/census-aiannh_cb.topojson"),
+         "census-aiannh_cb.topojson",
+         content_type = "application/json",
+         cache_control = "max-age=3600")
+
+  s3_put(s3_bucket_name,
+         paste0(s3_prefix, "/census-aiannh_simple.topojson"),
+         "census-aiannh_simple.topojson",
+         content_type = "application/json",
+         cache_control = "max-age=3600")
+
+  s3_put(s3_bucket_name,
+         paste0(s3_prefix, "/census-aiannh.fgb"),
+         "census-aiannh.fgb",
+         cache_control = "max-age=3600")
+
+  s3_put(s3_bucket_name,
+         paste0(s3_prefix, "/census-aiannh_cb.fgb"),
+         "census-aiannh_cb.fgb",
+         cache_control = "max-age=3600")
+
+  s3_put(s3_bucket_name,
+         paste0(s3_prefix, "/census-aiannh_simple.fgb"),
+         "census-aiannh_simple.fgb",
+         cache_control = "max-age=3600")
+
+  s3_put(s3_bucket_name,
+         paste0(s3_prefix, "/census-aiannh.pmtiles"),
+         "census-aiannh.pmtiles",
          cache_control = "max-age=3600")
 
   # ---- Regenerate census-aiannh-manifest.json from the S3 listing ----
@@ -1146,6 +1439,13 @@ if (!publish) {
 
   cf_invalidate(
     c(paste0("/", s3_prefix, "/census-aiannh.parquet"),
+      paste0("/", s3_prefix, "/census-aiannh.topojson"),
+      paste0("/", s3_prefix, "/census-aiannh_cb.topojson"),
+      paste0("/", s3_prefix, "/census-aiannh_simple.topojson"),
+      paste0("/", s3_prefix, "/census-aiannh.fgb"),
+      paste0("/", s3_prefix, "/census-aiannh_cb.fgb"),
+      paste0("/", s3_prefix, "/census-aiannh_simple.fgb"),
+      paste0("/", s3_prefix, "/census-aiannh.pmtiles"),
       paste0("/", s3_prefix, "/census-aiannh-manifest.json"),
       paste0("/", s3_prefix, "/manifest-sha256.txt"),
       paste0("/", s3_prefix, "/data/quality/geometry_validation.csv"),
