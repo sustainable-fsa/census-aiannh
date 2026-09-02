@@ -1,0 +1,11 @@
+{
+  "upload_type": "dataset",
+  "title": "Vintage-Matched US Census American Indian / Alaska Native / Native Hawaiian (AIANNH) Area Boundaries (Sustainable FSA Archive)",
+  "creators": [
+    { "name": "U.S. Census Bureau" },
+    { "name": "Bocinsky, R. Kyle",
+      "affiliation": "Montana Climate Office, University of Montana" }
+  ],
+  "keywords": ["AIANNH", "tribal boundaries", "American Indian reservations", "off-reservation trust land", "Alaska Native village statistical areas", "Hawaiian home lands", "TIGER/Line", "USDA"],
+  "license": "cc-zero"
+}

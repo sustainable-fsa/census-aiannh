@@ -1,0 +1,9 @@
+title: US Census AIANNH Boundaries Archive
+description: Vintage-matched US Census American Indian / Alaska Native / Native Hawaiian Area boundaries — raw TIGER/Line, waterline-clipped, a multi-vintage parquet, and derived TopoJSON, FlatGeobuf, and PMTiles.
+author: R. Kyle Bocinsky
+url: "https://sustainable-fsa.com/census-aiannh/"
+baseurl: "/census-aiannh"
+
+remote_theme: jekyll/minima
+plugins:
+  - jekyll-remote-theme

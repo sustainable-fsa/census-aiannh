@@ -1,0 +1,13 @@
+.DS_Store
+.Rproj.user
+.Rhistory
+.Rdata
+.httr-oauth
+.quarto
+.RData
+
+# S3-hosted data (archive of record: https://data.sustainable-fsa.com/census-aiannh/)
+census-aiannh/
+census-aiannh.parquet
+census-aiannh-manifest.json
+census-aiannh.html
