@@ -255,9 +255,15 @@ for the _cb layer: 14 resolve (2010, 2013–2025) — `GENZ2010/gz_…`,
 
 ## Open threads
 
-1. First publish, `gh repo create sustainable-fsa/census-aiannh`, then the
-   Zenodo GitHub integration and first release (owner steps). Add the DOI badge
-   and citation DOI, plus `doi:`/`date-released:` in CITATION.cff, once minted.
+1. ~~First publish and `gh repo create sustainable-fsa/census-aiannh`.~~ Done
+   2026-09-01: the repo exists and S3 holds the full archive (verified against
+   the live listing — all 20 vintages × 5 artifact families + quality log).
+   Still owner steps: the Zenodo GitHub integration and first release; add the
+   DOI badge and citation DOI, plus `doi:`/`date-released:` in CITATION.cff,
+   once minted. Note the first CI run after the 2026-09-01 refactor overwrites
+   the published `census-aiannh.parquet` — the 15 MB all-vintage stack becomes
+   the ~7 MB latest-vintage copy — so anything reading that URL for stacked
+   vintages breaks then.
 2. Back-port `ensure_clipped()` to census-counties (see above).
 3. Repoint `usdm-aiannh` to read its boundaries from this archive, the way
    `usdm-counties` reads from census-counties.
