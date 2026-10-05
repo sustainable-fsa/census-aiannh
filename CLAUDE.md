@@ -265,8 +265,12 @@ for the _cb layer: 14 resolve (2010, 2013–2025) — `GENZ2010/gz_…`,
    the ~7 MB latest-vintage copy — so anything reading that URL for stacked
    vintages breaks then.
 2. Back-port `ensure_clipped()` to census-counties (see above).
-3. Repoint `usdm-aiannh` to read its boundaries from this archive, the way
-   `usdm-counties` reads from census-counties.
+3. ~~Repoint `usdm-aiannh` to read its boundaries from this archive, the way
+   `usdm-counties` reads from census-counties.~~ Done 2026-10-04: usdm-aiannh
+   reads `data/parquet/<year>-aiannh.parquet` (vintage V for USDM year V+1),
+   keyed by GEOID component, in the published NAD83 so this archive's `Area`
+   is the exact denominator. Anything here that changes `data/parquet/`
+   paths, columns, CRS or `Area` breaks it.
 4. ~~README Extent/size numbers should be refreshed from the first full
    build.~~ Done 2026-09-01: full local build (`PUBLISH=0`) gave 16,468 rows /
    920 GEOIDs / 20 vintages, 0 clip damage, quality log 20 `mask_fill_holes` +
