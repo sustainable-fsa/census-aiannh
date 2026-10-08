@@ -108,6 +108,13 @@ ported**. One `mask_year` per vintage, as a scalar.
 
 `mask_years` fallbacks: 2000, 2007, 2008, 2009, 2011 → 2010; 2012 → 2013.
 
+**From 2014 on there is no fallback: a vintage is deferred (`cb_pending`) until
+its own cb counties file resolves** — ported from census-counties 31a6c59 after
+the 2026-10-08 run died fetching a 404 cb_2026 (tl posts months before cb).
+Borrowing would be permanent, since the S3 listing decides reprocessing. The
+deferral runs before `latest_vintage` is pinned so the top-level files never
+point at an unbuildable year; already-clipped vintages skip the HEAD check.
+
 **The `identical(tl$id, clipped$id)` guard is what stands in for the composite
 machinery** — mapshaper's `-clean` drops null geometries silently, so a feature
 outside the mask would vanish without it. Keep it verbatim.

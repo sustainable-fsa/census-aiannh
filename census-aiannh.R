@@ -169,6 +169,28 @@ tl_urls <-
   ) %>%
   .[purrr::map_lgl(., url_exists)]
 
+## Census posts cb a few months after tl. A vintage from 2014 on waits for its
+## own cb counties (the mask source) rather than borrowing a neighbour's: the
+## S3 listing decides what is built, so a fallback clip would be archived for
+## good and never redone. Deferred before latest_vintage is pinned below, so the
+## top-level files keep mirroring the newest vintage that can be built.
+cb_pending <-
+  names(tl_urls) %>%
+  as.integer() %>%
+  purrr::keep(~ .x >= 2014L) %>%
+  purrr::discard(~ paste0("data/clipped/", .x, "-aiannh.parquet") %in% archived) %>%
+  purrr::discard(\(x){
+    url_exists(paste0("https://www2.census.gov/geo/tiger/GENZ", x,
+                      "/shp/cb_", x, "_us_county_500k.zip"))
+  }) %>%
+  as.character()
+
+if (length(cb_pending)) {
+  message("tl published but cb not yet, deferring: ",
+          paste(cb_pending, collapse = ", "))
+  tl_urls <- tl_urls[setdiff(names(tl_urls), cb_pending)]
+}
+
 ## The _cb artifacts are Census's own cartographic boundary (cb) 500k AIANNH
 ## product, generalized and clipped to shoreline by Census. Published for 2010
 ## (inside GENZ2010 under the summary-level naming, 250 = AIANNH), 2013, and
